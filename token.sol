@@ -260,92 +260,80 @@ contract ConfigurableToken is StandardToken, Ownable {
   bool internal isActivated = false;
 
   event SaleContractActivation(address saleContract, uint256 tokensForSale);
-  event privateIcoTokensSent(address _to, uint256 _value);
-  event teamTokensSent(address _to, uint256 _value);
-  event legalTokensSent(address _to, uint256 _value);
-  event marketingTokensSent(address _to, uint256 _value);
-  event developmentTokensSent(address _to, uint256 _value);
-  event partnershipsTokensSent(address _to, uint256 _value);
-  event growthTokensSent(address _to, uint256 _value);
+  event TokensSent(address _to, uint256 _value, string _for);
 
-  function activateSaleContract(address _saleContract) public onlyOwner {
+  function activateSaleContract(address _saleContract) public onlyOwner returns (bool) {
     require(_saleContract != address(0));
     require(!isActivated);
     balances[_saleContract] = balances[_saleContract].add(icoTokens);
     totalSupply_ = totalSupply_.add(icoTokens);
     isActivated = true;
-    Transfer(address(this), _saleContract, icoTokens);
+    Transfer(address(0), _saleContract, icoTokens);
     SaleContractActivation(_saleContract, icoTokens);
+    return true;
   }
 
   function sendPrivateIcoTokens(address _to, uint256 _value) public onlyOwner returns (bool) {
-    uint256 value = _value.mul(1 ether);
+    uint256 value = _value;
     require(privateIcoTokens >= value);
-    totalSupply_ = totalSupply_.add(value);
-    balances[_to] = balances[_to].add(value);
     privateIcoTokens = privateIcoTokens.sub(value);
-    Transfer(address(this), _to, value);
-    privateIcoTokensSent(_to, _value);
+    _sendTokens(_to, value, 'private ICO');
+    return true;
   }
 
   function sendTeamTokens(address _to, uint256 _value) public onlyOwner returns (bool) {
-    uint256 value = _value.mul(1 ether);
+    uint256 value = _value;
     require(teamTokens >= value);
-    totalSupply_ = totalSupply_.add(value);
-    balances[_to] = balances[_to].add(value);
     teamTokens = teamTokens.sub(value);
-    Transfer(address(this), _to, value); 
-    teamTokensSent(_to, _value);
+    _sendTokens(_to, value, 'team');
+    return true;
   }
 
   function sendLegalTokens(address _to, uint256 _value) public onlyOwner returns (bool) {
-    uint256 value = _value.mul(1 ether);
+    uint256 value = _value;
     require(legalTokens >= value);
-    totalSupply_ = totalSupply_.add(value);
-    balances[_to] = balances[_to].add(value);
     legalTokens = legalTokens.sub(value);
-    Transfer(address(this), _to, value);  
-    legalTokensSent(_to, _value);
+    _sendTokens(_to, value, 'legal');
+    return true;
   }
 
   function sendMarketingTokens(address _to, uint256 _value) public onlyOwner returns (bool) {
-    uint256 value = _value.mul(1 ether);
+    uint256 value = _value;
     require(marketingTokens >= value);
-    totalSupply_ = totalSupply_.add(value);
-    balances[_to] = balances[_to].add(value);
     marketingTokens = marketingTokens.sub(value);
-    Transfer(address(this), _to, value); 
-    marketingTokensSent(_to, _value); 
+    _sendTokens(_to, value, 'marketing');
+    return true;
   }
 
   function sendDevelopmentTokens(address _to, uint256 _value) public onlyOwner returns (bool) {
-    uint256 value = _value.mul(1 ether);
+    uint256 value = _value;
     require(developmentTokens >= value);
-    totalSupply_ = totalSupply_.add(value);
-    balances[_to] = balances[_to].add(value);
     developmentTokens = developmentTokens.sub(value);
-    Transfer(address(this), _to, value); 
-    developmentTokensSent(_to, _value); 
+    _sendTokens(_to, value, 'development');
+    return true;
   }
 
   function sendPartnershipsTokens(address _to, uint256 _value) public onlyOwner returns (bool) {
-    uint256 value = _value.mul(1 ether);
+    uint256 value = _value;
     require(partnershipsTokens >= value);
-    totalSupply_ = totalSupply_.add(value);
-    balances[_to] = balances[_to].add(value);
     partnershipsTokens = partnershipsTokens.sub(value);
-    Transfer(address(this), _to, value);  
-    partnershipsTokensSent(_to, _value);
+    _sendTokens(_to, value, 'partnership');
+    return true;
   }
 
   function sendGrowthTokens(address _to, uint256 _value) public onlyOwner returns (bool) {
-    uint256 value = _value.mul(1 ether);
+    uint256 value = _value;
     require(growthTokens >= value);
-    totalSupply_ = totalSupply_.add(value);
-    balances[_to] = balances[_to].add(value);
     growthTokens = growthTokens.sub(value);
-    Transfer(address(this), _to, value);  
-    growthTokensSent(_to, _value);
+    _sendTokens(_to, value, 'growth');
+    return true;
+  }
+
+  function _sendTokens(address _to, uint256 _value, string _for) internal {
+    totalSupply_ = totalSupply_.add(_value);
+    balances[_to] = balances[_to].add(_value);
+    Transfer(address(0), _to, _value);  
+    TokensSent(_to, _value, _for);
   }
 }
 

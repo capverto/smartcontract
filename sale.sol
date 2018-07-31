@@ -64,7 +64,7 @@ library SafeMath {
  * behavior.
  */
 
- contract OraclizeI {
+contract OraclizeI {
     address public cbAddress;
     function query(uint _timestamp, string _datasource, string _arg) external payable returns (bytes32 _id);
     function query_withGasLimit(uint _timestamp, string _datasource, string _arg, uint _gaslimit) external payable returns (bytes32 _id);
@@ -111,13 +111,15 @@ library Buffer {
         uint capacity;
     }
 
-    function init(buffer memory buf, uint capacity) internal pure {
+    function init(buffer memory buf, uint _capacity) internal pure {
+        uint capacity = _capacity;
         if(capacity % 32 != 0) capacity += 32 - (capacity % 32);
         // Allocate space for the buffer data
         buf.capacity = capacity;
         assembly {
             let ptr := mload(0x40)
             mstore(buf, ptr)
+            mstore(ptr, 0)
             mstore(0x40, add(ptr, capacity))
         }
     }
@@ -136,7 +138,7 @@ library Buffer {
     }
 
     /**
-     * @dev Appends a byte array to the end of the buffer. Reverts if doing so
+     * @dev Appends a byte array to the end of the buffer. Resizes if doing so
      *      would exceed the capacity of the buffer.
      * @param buf The buffer to append to.
      * @param data The data to append.
@@ -183,7 +185,7 @@ library Buffer {
     }
 
     /**
-     * @dev Appends a byte to the end of the buffer. Reverts if doing so would
+     * @dev Appends a byte to the end of the buffer. Resizes if doing so would
      * exceed the capacity of the buffer.
      * @param buf The buffer to append to.
      * @param data The data to append.
@@ -208,7 +210,7 @@ library Buffer {
     }
 
     /**
-     * @dev Appends a byte to the end of the buffer. Reverts if doing so would
+     * @dev Appends a byte to the end of the buffer. Resizes if doing so would
      * exceed the capacity of the buffer.
      * @param buf The buffer to append to.
      * @param data The data to append.
@@ -313,8 +315,8 @@ contract usingOraclize {
     uint constant month = 60*60*24*30;
     byte constant proofType_NONE = 0x00;
     byte constant proofType_TLSNotary = 0x10;
-    byte constant proofType_Android = 0x20;
     byte constant proofType_Ledger = 0x30;
+    byte constant proofType_Android = 0x40;
     byte constant proofType_Native = 0xF0;
     byte constant proofStorage_IPFS = 0x01;
     uint8 constant networkID_auto = 0;
@@ -926,6 +928,7 @@ contract usingOraclize {
 
     using CBOR for Buffer.buffer;
     function stra2cbor(string[] arr) internal pure returns (bytes) {
+        safeMemoryCleaner();
         Buffer.buffer memory buf;
         Buffer.init(buf, 1024);
         buf.startArray();
@@ -937,6 +940,7 @@ contract usingOraclize {
     }
 
     function ba2cbor(bytes[] arr) internal pure returns (bytes) {
+        safeMemoryCleaner();
         Buffer.buffer memory buf;
         Buffer.init(buf, 1024);
         buf.startArray();
@@ -1241,6 +1245,13 @@ contract usingOraclize {
         return safer_ecrecover(hash, v, r, s);
     }
 
+    function safeMemoryCleaner() internal pure {
+        assembly {
+            let fmem := mload(0x40)
+            codecopy(fmem, codesize, sub(msize, fmem))
+        }
+    }
+
 }
 // </ORACLIZE_API>
 
@@ -1291,8 +1302,9 @@ contract PriceTicker is usingOraclize, Ownable {
     uint256 constant CUSTOM_GASLIMIT = 150000;
 
     event LogConstructorInitiated(string nextStep);
-    event newOraclizeQuery(string description);
-    event newPriceTicker(bytes32 myid, string price, bytes proof);
+    event NewOraclizeQuery(string description);
+    event NewPriceTicker(bytes32 myid, string price, bytes proof);
+    event ManualUpdate(uint256 price, uint256 timestamp);
 
 
     function PriceTicker() public {
@@ -1301,18 +1313,24 @@ contract PriceTicker is usingOraclize, Ownable {
     }
 
     function __callback(bytes32 myid, string result, bytes proof) public {
-        if (msg.sender != oraclize_cbAddress()) revert();
+        require(msg.sender == oraclize_cbAddress());
         ethPrice = parseInt(result, 2);
-        newPriceTicker(myid, result, proof);
+        NewPriceTicker(myid, result, proof);
     }
 
     function update() public onlyOwner {
         if (oraclize_getPrice("URL", CUSTOM_GASLIMIT) > this.balance) {
-            newOraclizeQuery("Oraclize query was NOT sent, please add some ETH to cover for the query fee");
+            NewOraclizeQuery("Oraclize query was NOT sent, please add some ETH to cover for the query fee");
         } else {
-            newOraclizeQuery("Oraclize query was sent, standing by for the answer..");
+            NewOraclizeQuery("Oraclize query was sent, standing by for the answer..");
             oraclize_query("URL", "json(https://api.kraken.com/0/public/Ticker?pair=ETHUSD).result.XETHZUSD.c.0", CUSTOM_GASLIMIT);
         }
+    }
+
+    function updateManual(uint256 _usdCents) public onlyOwner {
+        require(_usdCents > 0);
+        ethPrice = _usdCents;
+        ManualUpdate(_usdCents, now);
     }
 }
 
@@ -1331,22 +1349,9 @@ contract Crowdsale is PriceTicker {
   uint8 currentStage; // 0 - sale is not active, 9 - sale is over
   uint256 public currentStageStartTime;
   uint256 public week = 604800;
-  mapping(uint8 => uint256) icoStageCap;
-  mapping(uint8 => uint256) icoStageSold;
-  mapping(uint8 => uint32) icoStagePrice;
-
-  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-//For testing period only. Should be deleted in production (as well as .add(extraTime) in functions below)
-  uint256 public extraTime = 0;
-
-  function addExtraDays(uint256 _days) public onlyOwner {
-    extraTime = extraTime.add(_days.mul(3600).mul(24));
-  }
-
-  function getExtraDays() public view returns(uint256) {
-    return extraTime.div(3600).div(24);
-  }
-//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  mapping(uint8 => uint256) public icoStageCap;
+  mapping(uint8 => uint256) public icoStageSold;
+  mapping(uint8 => uint32) public icoStagePrice;
 
   /**
    * Event for token purchase logging
@@ -1391,6 +1396,7 @@ contract Crowdsale is PriceTicker {
   }
 
   function startIco() public onlyOwner returns (bool) {
+    require(currentStage == 0);
     currentStage = 1;
     currentStageStartTime = now;
   }
@@ -1411,7 +1417,7 @@ contract Crowdsale is PriceTicker {
    */
   function buyTokens(address _beneficiary) public payable {
     uint256 weiAmount = msg.value;
-    require(weiAmount > 0);
+    require(weiAmount > 10 finney);
     require(ethPrice > 0);
     uint256 usdCents = weiAmount.mul(ethPrice).div(1 ether);
 
@@ -1428,7 +1434,7 @@ contract Crowdsale is PriceTicker {
   }
 
   function getPassedWeeks() public view returns (uint256) {
-    return now.add(extraTime).sub(currentStageStartTime).div(week);
+    return now.sub(currentStageStartTime).div(week);
   }
 
   // -----------------------------------------
@@ -1442,7 +1448,7 @@ contract Crowdsale is PriceTicker {
     } else if (currentStage > 0 && currentStage < 9) {
       if (passedPeriods > 0) {
         currentStage = currentStage + uint8(passedPeriods);
-        currentStageStartTime = now.add(extraTime);
+        currentStageStartTime = now;
         if (currentStage > 8) currentStage = 9;
       }
     }
@@ -1453,7 +1459,7 @@ contract Crowdsale is PriceTicker {
    * @param _usdCents Value in usd cents to be converted into tokens
    * @return Number of tokens that can be purchased with the specified _usdCents
    */
-  function _getTokenAmount(uint256 _usdCents) public view returns (uint256) {
+  function _getTokenAmount(uint256 _usdCents) internal view returns (uint256) {
     return _usdCents.mul(1 ether).div(icoStagePrice[currentStage]);
   }
 
@@ -1487,7 +1493,7 @@ contract Crowdsale is PriceTicker {
     _deliverTokens(_beneficiary, _tokenAmount);
     if (nextStage) {
       currentStage = currentStage + 1;
-      currentStageStartTime = now.add(extraTime);
+      currentStageStartTime = now;
       if (currentStage > 8) currentStage = 9;
     }
     wallet.transfer(purchaseWei);
@@ -1496,7 +1502,7 @@ contract Crowdsale is PriceTicker {
 
   function transferSoldTokens(address _beneficiary, uint256 _tokenAmount) public onlyOwner {
     require(currentStage > 0);
-    uint256 tokenAmount = _tokenAmount.mul(1 ether);
+    uint256 tokenAmount = _tokenAmount;
     getStage();
     if (currentStage < 9) {
       require(tokenAmount <= icoStageCap[currentStage]);
